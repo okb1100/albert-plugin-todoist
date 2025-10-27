@@ -1,0 +1,9 @@
+{
+    "name": "Todoist",
+    "description": "Manage Todoist tasks",
+    "license": "MIT",
+    "authors": ["@okb1100"],
+    "maintainers": ["@okb1100"],
+    "url": "https://github.com/okb1100/albert-plugin-todoist",
+    "platforms": ["Linux", "macOS", "Windows"]
+}
