@@ -179,7 +179,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             query.add(StandardItem(
                 id="add-task-action",
                 text=f"Add task: {content}",
-                subtext="Press Enter to add this task to Todoist",
+                subtext="Supports: dates (today, tomorrow), #Project, @label, p1-p4, {deadline}, // description",
                 actions=[
                     Action("add", "Add task", lambda: self._add_task(content))
                 ]
@@ -220,6 +220,16 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             query.add(items)
 
     def _add_task(self, content: str):
+        """Add a task using Quick Add API which supports natural language parsing.
+        
+        This enables features like:
+        - Date parsing: "clean the room today", "meeting tomorrow at 3pm"
+        - Project assignment: "Buy book #Books" (project name without spaces)
+        - Labels: "urgent task @work @important"
+        - Priority: "important task p1"
+        - Deadlines: "finish report {next friday}"
+        - Description: "task name // this is the description"
+        """
         current_token = self.readConfig("api_token", str) or ""
         if not current_token:
             return
@@ -228,17 +238,22 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 'Authorization': f'Bearer {current_token}',
                 'Content-Type': 'application/json'
             }
+            # Use Quick Add API for natural language parsing
+            # This parses dates like "today", "tomorrow", projects like "#Books", labels like "@work"
             data = {
-                'content': content
+                'text': content,
+                'auto_reminder': True  # Enable auto-reminder if due date with time is set
             }
             response = requests.post(
-                'https://api.todoist.com/rest/v2/tasks',
+                'https://api.todoist.com/api/v1/tasks/quick',
                 headers=headers,
                 json=data
             )
             if response.status_code == 200:
-                info(f"Task added successfully: {content}")
-                notification = Notification("Todoist", f"Task added: {content}")
+                result = response.json()
+                task_content = result.get('content', content)
+                info(f"Task added successfully: {task_content}")
+                notification = Notification("Todoist", f"Task added: {task_content}")
                 notification.send()
             else:
                 try:
