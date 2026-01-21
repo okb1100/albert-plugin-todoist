@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 
-md_iid = "3.1"
-md_version = "1.0"
+md_iid = "4.0"
+md_version = "1.1"
 md_name = "Todoist"
 md_description = "Manage Todoist tasks"
 
@@ -127,7 +127,6 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="no-token",
                 text="No API token configured",
                 subtext="Go to plugin settings to configure your Todoist API token",
-                iconUrls=[],
                 actions=[
                     Action("config", "Open settings", lambda: openUrl("albert://settings"))
                 ]
@@ -151,7 +150,6 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="add-task",
                 text="Add new task",
                 subtext="td add <task content>",
-                iconUrls=[],
                 actions=[
                     Action("add", "Add task", lambda: self._quick_add_task())
                 ]
@@ -160,7 +158,6 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             #     id="today-tasks",
             #     text="Today's tasks",
             #     subtext="Show tasks due today",
-            #     iconUrls=[],
             #     actions=[
             #         Action("today", "Show today's tasks", lambda: self.handleTriggerQuery(Query('today')))
             #     ]
@@ -169,7 +166,6 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="refresh",
                 text="Refresh tasks",
                 subtext="Sync with Todoist",
-                iconUrls=[],
                 actions=[
                     Action("refresh", "Refresh", lambda: self._refresh_tasks())
                 ]
@@ -184,7 +180,6 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="add-task-action",
                 text=f"Add task: {content}",
                 subtext="Press Enter to add this task to Todoist",
-                iconUrls=[],
                 actions=[
                     Action("add", "Add task", lambda: self._add_task(content))
                 ]
@@ -199,11 +194,10 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                     id=p.get('id'),
                     text=p.get('name'),
                     subtext=f"Project id: {p.get('id')}",
-                    iconUrls=[],
                     actions=[Action('open', 'Open Project', lambda pid=p.get('id'): openUrl(f"https://todoist.com/app/project/{pid}"))]
                 ))
         if not items:
-            query.add(StandardItem(id='no-project', text='No matching projects', subtext='Try a different name', iconUrls=[]))
+            query.add(StandardItem(id='no-project', text='No matching projects', subtext='Try a different name'))
         else:
             query.add(items)
 
@@ -218,11 +212,10 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                     id=t.get('id'),
                     text=t.get('content', ''),
                     subtext=f"Due: {due_str}",
-                    iconUrls=[],
                     actions=[Action('open', 'Open Task', lambda tid=t.get('id'): openUrl(f"https://todoist.com/app/task/{tid}"))]
                 ))
         if not items:
-            query.add(StandardItem(id='no-results', text='No matching tasks', subtext='Try a different query', iconUrls=[]))
+            query.add(StandardItem(id='no-results', text='No matching tasks', subtext='Try a different query'))
         else:
             query.add(items)
 
@@ -353,11 +346,10 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id=t.get('id'),
                 text=t.get('content', ''),
                 subtext=f"{due_str}",
-                iconUrls=[],
                 actions=[Action('open', 'Open Task', lambda tid=t.get('id'): openUrl(f"https://todoist.com/app/task/{tid}"))]
             ))
 
         if not items:
-            query.add(StandardItem(id='no-tasks', text='No tasks', subtext='No tasks matched the filters', iconUrls=[]))
+            query.add(StandardItem(id='no-tasks', text='No tasks', subtext='No tasks matched the filters'))
         else:
             query.add(items)

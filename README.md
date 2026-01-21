@@ -26,7 +26,9 @@ Manage your Todoist tasks directly from Albert launcher.
 ## Installation
 
 1. Clone or copy this plugin to your Albert Python plugins directory
-2. Enable the plugin in Albert settings
+    - MacOS: `git clone git@github.com/okb1100/albert-plugin-todoist ~/Library/Application\ Support/albert/python/plugins`
+    - Linux: `git clone git@github.com/okb1100/albert-plugin-todoist ~/.local/share/albert/python/plugins`
+2. Restart Albert and enable the plugin in Albert settings
 3. Configure your Todoist API token in the plugin settings
 
 ## Requirements
