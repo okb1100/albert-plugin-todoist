@@ -3,6 +3,7 @@
 from albert import *
 import json
 import requests
+import threading
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -31,8 +32,12 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         self.tasks = []
         self.user = {}
         self.fuzzy = False
+        self._syncing = False
         if not self.api_token:
             info("No Todoist API token configured")
+        else:
+            # Auto sync tasks when plugin loads
+            self._refresh_tasks(show_notification=False)
 
     def id(self) -> str:
         return __name__
@@ -208,11 +213,16 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             if matcher.match(t.get('content', '')):
                 due = t.get('due')
                 due_str = due.get('date') if due and due.get('date') else (due.get('datetime') if due else '')
+                task_id = t.get('id')
+                task_content = t.get('content', '')
                 items.append(StandardItem(
-                    id=t.get('id'),
-                    text=t.get('content', ''),
+                    id=task_id,
+                    text=task_content,
                     subtext=f"Due: {due_str}",
-                    actions=[Action('open', 'Open Task', lambda tid=t.get('id'): openUrl(f"https://todoist.com/app/task/{tid}"))]
+                    actions=[
+                        Action('open', 'Show details', lambda tid=task_id: openUrl(f"https://todoist.com/app/task/{tid}")),
+                        Action('done', '✓ Set as done', lambda tid=task_id, tc=task_content: self._complete_task(tid, tc))
+                    ]
                 ))
         if not items:
             query.add(StandardItem(id='no-results', text='No matching tasks', subtext='Try a different query'))
@@ -255,6 +265,8 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 info(f"Task added successfully: {task_content}")
                 notification = Notification("Todoist", f"Task added: {task_content}")
                 notification.send()
+                # Sync in background without extra notification
+                self._refresh_tasks(show_notification=False)
             else:
                 try:
                     err = response.json()
@@ -264,21 +276,58 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         except Exception as e:
             critical(f"Error adding task: {str(e)}")
 
-    def _refresh_tasks(self):
+    def _complete_task(self, task_id: str, task_content: str = ""):
+        """Mark a task as completed."""
         current_token = self.readConfig("api_token", str) or ""
         if not current_token:
-            warning("No API token configured")
             return
-        sync_token = self.readConfig('sync_token', str) or '*'
-        headers = {
-            'Authorization': f'Bearer {current_token}'
-        }
-        payload = {
-            'sync_token': "*",
-            'resource_types': json.dumps(["items", "projects", "user"])
-        }
-        info("Syncing with Todoist...")
         try:
+            headers = {
+                'Authorization': f'Bearer {current_token}'
+            }
+            response = requests.post(
+                f'https://api.todoist.com/api/v1/tasks/{task_id}/close',
+                headers=headers
+            )
+            # 200 or 204 (No Content) both indicate success
+            if response.status_code in (200, 204):
+                info(f"Task completed: {task_content}")
+                Notification("Todoist", f"✓ Completed: {task_content}").send()
+                # Sync in background to update local cache
+                self._refresh_tasks(show_notification=False)
+            else:
+                try:
+                    err = response.json()
+                    warning(f"Failed to complete task: {response.status_code} {err}")
+                except Exception:
+                    warning(f"Failed to complete task: {response.status_code}")
+        except Exception as e:
+            critical(f"Error completing task: {str(e)}")
+
+    def _refresh_tasks(self, show_notification: bool = True):
+        """Start a background sync with Todoist."""
+        if self._syncing:
+            info("Sync already in progress, skipping")
+            return
+        thread = threading.Thread(target=self._do_sync, args=(show_notification,), daemon=True)
+        thread.start()
+
+    def _do_sync(self, show_notification: bool = True):
+        """Perform the actual sync in background thread."""
+        self._syncing = True
+        try:
+            current_token = self.readConfig("api_token", str) or ""
+            if not current_token:
+                warning("No API token configured")
+                return
+            headers = {
+                'Authorization': f'Bearer {current_token}'
+            }
+            payload = {
+                'sync_token': "*",
+                'resource_types': json.dumps(["items", "projects", "user"])
+            }
+            info("Syncing with Todoist...")
             resp = requests.post('https://api.todoist.com/api/v1/sync', headers=headers, data=payload, timeout=15)
             if resp.status_code == 200:
                 data = resp.json()
@@ -292,7 +341,8 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 self.tasks = data.get('items', []) or []
                 self.user = data.get('user', {}) or {}
                 info(f"Synced {len(self.projects)} projects and {len(self.tasks)} tasks")
-                Notification('Todoist', f'Synced {len(self.tasks)} tasks').send()
+                if show_notification:
+                    Notification('Todoist', f'Synced {len(self.tasks)} tasks').send()
             else:
                 try:
                     err = resp.json()
@@ -301,6 +351,8 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                     warning(f"Sync failed: {resp.status_code}")
         except Exception as e:
             critical(f"Error during sync: {str(e)}")
+        finally:
+            self._syncing = False
 
     def _quick_add_task(self):
         openUrl("https://todoist.com/app/today")
@@ -357,11 +409,16 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             due_str = ''
             if due:
                 due_str = due.get('date') or due.get('datetime') or ''
+            task_id = t.get('id')
+            task_content = t.get('content', '')
             items.append(StandardItem(
-                id=t.get('id'),
-                text=t.get('content', ''),
+                id=task_id,
+                text=task_content,
                 subtext=f"{due_str}",
-                actions=[Action('open', 'Open Task', lambda tid=t.get('id'): openUrl(f"https://todoist.com/app/task/{tid}"))]
+                actions=[
+                    Action('open', 'Show details', lambda tid=task_id: openUrl(f"https://todoist.com/app/task/{tid}")),
+                    Action('done', '✓ Set as done', lambda tid=task_id, tc=task_content: self._complete_task(tid, tc))
+                ]
             ))
 
         if not items:

@@ -4,9 +4,10 @@ Manage your Todoist tasks directly from Albert launcher.
 
 ## Features
 
-- Add new tasks quickly
+- Add new tasks with natural language support (dates, projects, labels, priorities)
 - Search existing tasks
 - View today's tasks
+- Complete tasks directly from Albert
 - Project-specific task management
 - Quick access to Todoist web interface
 
@@ -18,10 +19,30 @@ Manage your Todoist tasks directly from Albert launcher.
 
 ## Usage
 
-- `td` - Show main options
+- `td` - Show today's tasks and main options
 - `td add <content>` - Add new task
 - `td project <name>` - Show project tasks
 - `td <search>` - Search tasks
+
+### Adding Tasks with Natural Language
+
+When adding tasks, you can use Todoist's natural language features:
+
+- **Dates**: `td add clean the room today`, `td add meeting tomorrow at 3pm`
+- **Projects**: `td add Buy book #Books` (use `#` followed by project name without spaces)
+- **Labels**: `td add urgent task @work @important`
+- **Priority**: `td add important task p1` (p1 is highest, p4 is lowest)
+- **Deadlines**: `td add finish report {next friday}`
+- **Description**: `td add task title // this is the description`
+
+### Task Actions (Keyboard Shortcuts)
+
+When viewing tasks:
+
+- **Enter** - Open task details in Todoist web
+- **Alt + ↓** then **Enter** - Opens the action menu where you can:
+  - Show details (open in web)
+  - ✓ Set as done (complete the task)
 
 ## Installation
 
