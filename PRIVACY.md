@@ -1,6 +1,6 @@
 # Privacy Policy for Albert Todoist Plugin
 
-Last updated: January 2025
+Last updated: January 2026
 
 ## We do not collect, store, or transmit any of your data.
 
