@@ -4,40 +4,46 @@ from albert import *
 import json
 import requests
 import threading
-from pathlib import Path
-from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, date
 
 md_iid = "4.0"
-md_version = "1.1"
+md_version = "1.2"
 md_name = "Todoist"
 md_description = "Manage Todoist tasks"
-
 md_license = "MIT"
 md_url = "https://github.com/okb1100/albert-plugin-todoist"
 md_authors = ["@okb1100"]
 md_maintainers = ["@okb1100"]
 md_lib_dependencies = ["requests"]
 
+# API endpoints
+TODOIST_API_BASE = "https://api.todoist.com/api/v1"
+TODOIST_WEB_BASE = "https://todoist.com/app"
+
 
 class Plugin(PluginInstance, TriggerQueryHandler):
+    """Todoist integration for Albert launcher."""
+
     def __init__(self):
         PluginInstance.__init__(self)
         TriggerQueryHandler.__init__(self)
-        self.api_token = self.readConfig("api_token", str) or ""
-        self.max_tasks = int(self.readConfig("max_tasks", int) or 10)
-        self.project = self.readConfig("project", str) or "inbox"
-        self.show_today_only = bool(self.readConfig("show_today_only", bool) if self.readConfig("show_today_only", bool) is not None else True)
-        self.projects = []
-        self.tasks = []
-        self.user = {}
-        self.fuzzy = False
-        self._syncing = False
-        if not self.api_token:
-            info("No Todoist API token configured")
-        else:
-            # Auto sync tasks when plugin loads
+
+        # Runtime state (not persisted)
+        self._projects: list = []
+        self._tasks: list = []
+        self._user: dict = {}
+        self._fuzzy: bool = False
+        self._syncing: bool = False
+
+        # Initial sync if token is configured
+        if self._get_api_token():
             self._refresh_tasks(show_notification=False)
+        else:
+            info("No Todoist API token configured")
+
+    # -------------------------------------------------------------------------
+    # Extension interface
+    # -------------------------------------------------------------------------
 
     def id(self) -> str:
         return __name__
@@ -52,92 +58,120 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         return "td "
 
     def synopsis(self, query: str) -> str:
-        return "td <query> - Search and manage Todoist tasks"
+        return "<query> | add <task> | project <name>"
 
     def supportsFuzzyMatching(self) -> bool:
         return True
 
     def setFuzzyMatching(self, enabled: bool):
-        self.fuzzy = enabled
+        self._fuzzy = enabled
 
-    def configWidget(self) -> List[dict]:
+    # -------------------------------------------------------------------------
+    # Config helpers (cached reads to avoid I/O on every keystroke)
+    # -------------------------------------------------------------------------
+
+    def _get_api_token(self) -> str:
+        return self.readConfig("api_token", str) or ""
+
+    def _get_max_tasks(self) -> int:
+        return int(self.readConfig("max_tasks", int) or 10)
+
+    def _get_project_filter(self) -> str:
+        return self.readConfig("project", str) or "inbox"
+
+    def _get_show_today_only(self) -> bool:
+        val = self.readConfig("show_today_only", bool)
+        return True if val is None else bool(val)
+
+    # -------------------------------------------------------------------------
+    # Config widget (for Albert settings UI)
+    # -------------------------------------------------------------------------
+
+    @property
+    def api_token(self) -> str:
+        return self._get_api_token()
+
+    @api_token.setter
+    def api_token(self, value: str):
+        self.writeConfig("api_token", value)
+
+    @property
+    def max_tasks(self) -> int:
+        return self._get_max_tasks()
+
+    @max_tasks.setter
+    def max_tasks(self, value: int):
+        self.writeConfig("max_tasks", value)
+
+    @property
+    def project(self) -> str:
+        return self._get_project_filter()
+
+    @project.setter
+    def project(self, value: str):
+        self.writeConfig("project", value)
+
+    @property
+    def show_today_only(self) -> bool:
+        return self._get_show_today_only()
+
+    @show_today_only.setter
+    def show_today_only(self, value: bool):
+        self.writeConfig("show_today_only", value)
+
+    def configWidget(self) -> list:
         return [
             {
-                'type': 'label',
-                'text': '<b>Todoist Configuration</b>'
+                "type": "label",
+                "text": "<b>Todoist Configuration</b>",
             },
             {
-                'type': 'lineedit',
-                'property': 'api_token',
-                'label': 'API Token',
-                'widget_properties': {
-                    'echoMode': 2,
-                    'placeholderText': 'Enter your Todoist API token'
-                }
+                "type": "lineedit",
+                "property": "api_token",
+                "label": "API Token",
+                "widget_properties": {
+                    "echoMode": 2,
+                    "placeholderText": "Enter your Todoist API token",
+                },
             },
             {
-                'type': 'spinbox',
-                'property': 'max_tasks',
-                'label': 'Max tasks to show',
-                'widget_properties': {
-                    'minimum': 1,
-                    'maximum': 50
-                }
+                "type": "spinbox",
+                "property": "max_tasks",
+                "label": "Max tasks to show",
+                "widget_properties": {"minimum": 1, "maximum": 50},
             },
             {
-                'type': 'lineedit',
-                'property': 'project',
-                'label': 'Project (name or "inbox")',
-                'widget_properties': {
-                    'placeholderText': 'Inbox or project name'
-                }
+                "type": "lineedit",
+                "property": "project",
+                "label": 'Project (name or "inbox")',
+                "widget_properties": {"placeholderText": "Inbox or project name"},
             },
             {
-                'type': 'checkbox',
-                'property': 'show_today_only',
-                'label': 'Show today only',
-                'checked': True
+                "type": "checkbox",
+                "property": "show_today_only",
+                "label": "Show today only",
             },
             {
-                'type': 'label',
-                'text': 'Get your API token from <a href="https://app.todoist.com/app/settings/integrations/developer">Todoist Settings → Integrations → API token</a>'
-            }
+                "type": "label",
+                "text": 'Get your API token from <a href="https://app.todoist.com/app/settings/integrations/developer">Todoist Settings</a>',
+            },
         ]
 
-    def __getattr__(self, name):
-        if name == 'api_token':
-            return self.readConfig('api_token', str) or ""
-        if name == 'max_tasks':
-            return int(self.readConfig('max_tasks', int) or 10)
-        if name == 'project':
-            return self.readConfig('project', str) or "inbox"
-        if name == 'show_today_only':
-            val = self.readConfig('show_today_only', bool)
-            return True if val is None else bool(val)
-        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{name}'")
-
-    def __setattr__(self, name, value):
-        if name in ('api_token', 'max_tasks', 'project', 'show_today_only', 'sync_token'):
-            try:
-                self.writeConfig(name, value)
-            except Exception:
-                super().__setattr__(name, value)
-        else:
-            super().__setattr__(name, value)
+    # -------------------------------------------------------------------------
+    # Query handling
+    # -------------------------------------------------------------------------
 
     def handleTriggerQuery(self, query: Query):
-        current_token = self.readConfig("api_token", str) or ""
-        if not current_token:
-            query.add(StandardItem(
-                id="no-token",
-                text="No API token configured",
-                subtext="Go to plugin settings to configure your Todoist API token",
-                actions=[
-                    Action("config", "Open settings", lambda: openUrl("albert://settings"))
-                ]
-            ))
+        if not query.isValid:
             return
+
+        token = self._get_api_token()
+        if not token:
+            query.add(self._make_no_token_item())
+            return
+
         query_string = query.string.strip()
+
         if not query_string:
             self._show_default_options(query)
         elif query_string == "today":
@@ -150,278 +184,312 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             self._search_tasks(query, query_string)
 
     def _show_default_options(self, query: Query):
+        if not query.isValid:
+            return
+
         items = [
             StandardItem(
                 id="add-task",
                 text="Add new task",
                 subtext="td add <task content>",
-                actions=[
-                    Action("add", "Add task", lambda: self._quick_add_task())
-                ]
+                actions=[Action("add", "Open Todoist", lambda: openUrl(f"{TODOIST_WEB_BASE}/today"))],
             ),
-            # StandardItem(
-            #     id="today-tasks",
-            #     text="Today's tasks",
-            #     subtext="Show tasks due today",
-            #     actions=[
-            #         Action("today", "Show today's tasks", lambda: self.handleTriggerQuery(Query('today')))
-            #     ]
-            # ),
             StandardItem(
                 id="refresh",
                 text="Refresh tasks",
                 subtext="Sync with Todoist",
-                actions=[
-                    Action("refresh", "Refresh", lambda: self._refresh_tasks())
-                ]
-            )
+                actions=[Action("refresh", "Refresh", lambda: self._refresh_tasks())],
+            ),
         ]
         query.add(items)
         self._show_today_tasks(query)
 
     def _handle_add_task(self, query: Query, content: str):
-        if content.strip():
-            query.add(StandardItem(
+        if not query.isValid:
+            return
+
+        content = content.strip()
+        if not content:
+            return
+
+        query.add(
+            StandardItem(
                 id="add-task-action",
                 text=f"Add task: {content}",
-                subtext="Supports: dates (today, tomorrow), #Project, @label, p1-p4, {deadline}, // description",
-                actions=[
-                    Action("add", "Add task", lambda: self._add_task(content))
-                ]
-            ))
+                subtext="dates, #Project, @label, p1-p4, // description",
+                actions=[Action("add", "Add task", lambda c=content: self._add_task(c))],
+            )
+        )
 
     def _handle_project_query(self, query: Query, project_name: str):
-        matcher = Matcher(project_name, MatchConfig(fuzzy=self.fuzzy))
-        items = []
-        for p in self.projects:
-            if matcher.match(p.get('name', '')):
-                items.append(StandardItem(
-                    id=p.get('id'),
-                    text=p.get('name'),
-                    subtext=f"Project id: {p.get('id')}",
-                    actions=[Action('open', 'Open Project', lambda pid=p.get('id'): openUrl(f"https://todoist.com/app/project/{pid}"))]
-                ))
-        if not items:
-            query.add(StandardItem(id='no-project', text='No matching projects', subtext='Try a different name'))
-        else:
-            query.add(items)
+        if not query.isValid:
+            return
+
+        project_name = project_name.strip()
+
+        # No project name: show all projects
+        if not project_name:
+            items = [
+                StandardItem(
+                    id=str(p.get("id")),
+                    text=p.get("name", "Unknown"),
+                    subtext=f"Type 'td project {p.get('name')}' to see tasks",
+                    actions=[
+                        Action(
+                            "open",
+                            "Open Project",
+                            lambda pid=p.get("id"): openUrl(f"{TODOIST_WEB_BASE}/project/{pid}"),
+                        )
+                    ],
+                )
+                for p in self._projects
+            ]
+            query.add(items) if items else query.add(self._make_empty_item("No projects"))
+            return
+
+        # Find matching project
+        matcher = Matcher(project_name, MatchConfig(fuzzy=self._fuzzy))
+        matching_project = next((p for p in self._projects if matcher.match(p.get("name", ""))), None)
+
+        if not matching_project:
+            query.add(self._make_empty_item("No matching project", "Try a different name"))
+            return
+
+        project_id = matching_project.get("id")
+        project_display_name = matching_project.get("name", "Unknown")
+
+        # Filter tasks for this project
+        project_tasks = [
+            t
+            for t in self._tasks
+            if str(t.get("project_id")) == str(project_id)
+            and not t.get("checked")
+            and not t.get("is_deleted")
+        ]
+
+        if not project_tasks:
+            query.add(
+                StandardItem(
+                    id="no-tasks",
+                    text=f"No tasks in {project_display_name}",
+                    subtext="All tasks completed or project is empty",
+                    actions=[
+                        Action("open", "Open Project", lambda: openUrl(f"{TODOIST_WEB_BASE}/project/{project_id}"))
+                    ],
+                )
+            )
+            return
+
+        items = [self._make_task_item(t, project_display_name) for t in project_tasks]
+        query.add(items)
 
     def _search_tasks(self, query: Query, search_term: str):
-        matcher = Matcher(search_term, MatchConfig(fuzzy=self.fuzzy))
+        if not query.isValid:
+            return
+
+        matcher = Matcher(search_term, MatchConfig(fuzzy=self._fuzzy))
         items = []
-        for t in self.tasks:
-            if matcher.match(t.get('content', '')):
-                due = t.get('due')
-                due_str = due.get('date') if due and due.get('date') else (due.get('datetime') if due else '')
-                task_id = t.get('id')
-                task_content = t.get('content', '')
-                items.append(StandardItem(
-                    id=task_id,
-                    text=task_content,
-                    subtext=f"Due: {due_str}",
-                    actions=[
-                        Action('open', 'Show details', lambda tid=task_id: openUrl(f"https://todoist.com/app/task/{tid}")),
-                        Action('done', '✓ Set as done', lambda tid=task_id, tc=task_content: self._complete_task(tid, tc))
-                    ]
-                ))
-        if not items:
-            query.add(StandardItem(id='no-results', text='No matching tasks', subtext='Try a different query'))
-        else:
+
+        for t in self._tasks:
+            if not query.isValid:
+                return
+            if t.get("checked") or t.get("is_deleted"):
+                continue
+            if matcher.match(t.get("content", "")):
+                items.append(self._make_task_item(t))
+
+        if items:
             query.add(items)
+        else:
+            query.add(self._make_empty_item("No matching tasks", "Try a different query"))
+
+    def _show_today_tasks(self, query: Query):
+        if not query.isValid:
+            return
+
+        max_tasks = self._get_max_tasks()
+        show_today = self._get_show_today_only()
+        today = date.today()
+
+        # Filter tasks
+        filtered = [
+            t
+            for t in self._tasks
+            if not t.get("checked")
+            and not t.get("is_deleted")
+            and (not show_today or self._is_due_on_date(t.get("due"), today))
+        ]
+
+        # Sort by day_order
+        filtered.sort(key=lambda x: x.get("day_order") or 0)
+
+        if not filtered:
+            query.add(self._make_empty_item("No tasks", "No tasks matched the filters"))
+            return
+
+        items = [self._make_task_item(t) for t in filtered[:max_tasks]]
+        query.add(items)
+
+    # -------------------------------------------------------------------------
+    # Item factory helpers
+    # -------------------------------------------------------------------------
+
+    def _make_task_item(self, task: dict, project_name: str = None) -> StandardItem:
+        task_id = task.get("id")
+        task_content = task.get("content", "")
+        due = task.get("due")
+        due_str = self._format_due_date(due)
+
+        if project_name:
+            subtext = f"{project_name} | {due_str}" if due_str else project_name
+        else:
+            subtext = due_str
+
+        return StandardItem(
+            id=str(task_id),
+            text=task_content,
+            subtext=subtext,
+            actions=[
+                Action("open", "Show details", lambda tid=task_id: openUrl(f"{TODOIST_WEB_BASE}/task/{tid}")),
+                Action(
+                    "done",
+                    "Set as done",
+                    lambda tid=task_id, tc=task_content: self._complete_task(tid, tc),
+                ),
+            ],
+        )
+
+    def _make_empty_item(self, text: str, subtext: str = "") -> StandardItem:
+        return StandardItem(id="empty", text=text, subtext=subtext)
+
+    def _make_no_token_item(self) -> StandardItem:
+        return StandardItem(
+            id="no-token",
+            text="No API token configured",
+            subtext="Go to plugin settings to configure your Todoist API token",
+            actions=[Action("config", "Open settings", lambda: openUrl("albert://settings"))],
+        )
+
+    # -------------------------------------------------------------------------
+    # Date helpers
+    # -------------------------------------------------------------------------
+
+    def _format_due_date(self, due: dict) -> str:
+        if not due:
+            return ""
+        return due.get("date") or due.get("datetime") or ""
+
+    def _is_due_on_date(self, due: dict, target_date: date) -> bool:
+        if not due:
+            return False
+        date_str = due.get("date") or due.get("datetime")
+        if not date_str:
+            return False
+        try:
+            if "T" in date_str:
+                dt = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                return dt.date() == target_date
+            else:
+                return datetime.strptime(date_str, "%Y-%m-%d").date() == target_date
+        except Exception:
+            return False
+
+    # -------------------------------------------------------------------------
+    # Todoist API operations
+    # -------------------------------------------------------------------------
 
     def _add_task(self, content: str):
-        """Add a task using Quick Add API which supports natural language parsing.
-        
-        This enables features like:
-        - Date parsing: "clean the room today", "meeting tomorrow at 3pm"
-        - Project assignment: "Buy book #Books" (project name without spaces)
-        - Labels: "urgent task @work @important"
-        - Priority: "important task p1"
-        - Deadlines: "finish report {next friday}"
-        - Description: "task name // this is the description"
-        """
-        current_token = self.readConfig("api_token", str) or ""
-        if not current_token:
+        """Add a task using Quick Add API (supports natural language)."""
+        token = self._get_api_token()
+        if not token:
             return
+
         try:
-            headers = {
-                'Authorization': f'Bearer {current_token}',
-                'Content-Type': 'application/json'
-            }
-            # Use Quick Add API for natural language parsing
-            # This parses dates like "today", "tomorrow", projects like "#Books", labels like "@work"
-            data = {
-                'text': content,
-                'auto_reminder': True  # Enable auto-reminder if due date with time is set
-            }
             response = requests.post(
-                'https://api.todoist.com/api/v1/tasks/quick',
-                headers=headers,
-                json=data
+                f"{TODOIST_API_BASE}/tasks/quick",
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+                json={"text": content, "auto_reminder": True},
+                timeout=10,
             )
+
             if response.status_code == 200:
                 result = response.json()
-                task_content = result.get('content', content)
-                info(f"Task added successfully: {task_content}")
-                notification = Notification("Todoist", f"Task added: {task_content}")
-                notification.send()
-                # Sync in background without extra notification
+                task_content = result.get("content", content)
+                info(f"Task added: {task_content}")
+                Notification("Todoist", f"Task added: {task_content}").send()
                 self._refresh_tasks(show_notification=False)
             else:
-                try:
-                    err = response.json()
-                    warning(f"Failed to add task: {response.status_code} {err}")
-                except Exception:
-                    warning(f"Failed to add task: {response.status_code}")
+                self._log_api_error("add task", response)
         except Exception as e:
-            critical(f"Error adding task: {str(e)}")
+            critical(f"Error adding task: {e}")
 
     def _complete_task(self, task_id: str, task_content: str = ""):
         """Mark a task as completed."""
-        current_token = self.readConfig("api_token", str) or ""
-        if not current_token:
+        token = self._get_api_token()
+        if not token:
             return
+
         try:
-            headers = {
-                'Authorization': f'Bearer {current_token}'
-            }
             response = requests.post(
-                f'https://api.todoist.com/api/v1/tasks/{task_id}/close',
-                headers=headers
+                f"{TODOIST_API_BASE}/tasks/{task_id}/close",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
             )
-            # 200 or 204 (No Content) both indicate success
+
             if response.status_code in (200, 204):
                 info(f"Task completed: {task_content}")
-                Notification("Todoist", f"✓ Completed: {task_content}").send()
-                # Sync in background to update local cache
+                Notification("Todoist", f"Completed: {task_content}").send()
                 self._refresh_tasks(show_notification=False)
             else:
-                try:
-                    err = response.json()
-                    warning(f"Failed to complete task: {response.status_code} {err}")
-                except Exception:
-                    warning(f"Failed to complete task: {response.status_code}")
+                self._log_api_error("complete task", response)
         except Exception as e:
-            critical(f"Error completing task: {str(e)}")
+            critical(f"Error completing task: {e}")
 
     def _refresh_tasks(self, show_notification: bool = True):
         """Start a background sync with Todoist."""
         if self._syncing:
-            info("Sync already in progress, skipping")
+            info("Sync already in progress")
             return
+
         thread = threading.Thread(target=self._do_sync, args=(show_notification,), daemon=True)
         thread.start()
 
     def _do_sync(self, show_notification: bool = True):
-        """Perform the actual sync in background thread."""
+        """Perform sync in background thread."""
         self._syncing = True
         try:
-            current_token = self.readConfig("api_token", str) or ""
-            if not current_token:
+            token = self._get_api_token()
+            if not token:
                 warning("No API token configured")
                 return
-            headers = {
-                'Authorization': f'Bearer {current_token}'
-            }
-            payload = {
-                'sync_token': "*",
-                'resource_types': json.dumps(["items", "projects", "user"])
-            }
+
             info("Syncing with Todoist...")
-            resp = requests.post('https://api.todoist.com/api/v1/sync', headers=headers, data=payload, timeout=15)
-            if resp.status_code == 200:
-                data = resp.json()
-                new_token = data.get('sync_token')
-                if new_token:
-                    try:
-                        self.writeConfig('sync_token', new_token)
-                    except Exception:
-                        pass
-                self.projects = data.get('projects', []) or []
-                self.tasks = data.get('items', []) or []
-                self.user = data.get('user', {}) or {}
-                info(f"Synced {len(self.projects)} projects and {len(self.tasks)} tasks")
+            response = requests.post(
+                f"{TODOIST_API_BASE}/sync",
+                headers={"Authorization": f"Bearer {token}"},
+                data={"sync_token": "*", "resource_types": json.dumps(["items", "projects", "user"])},
+                timeout=15,
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                self._projects = data.get("projects") or []
+                self._tasks = data.get("items") or []
+                self._user = data.get("user") or {}
+                info(f"Synced {len(self._projects)} projects, {len(self._tasks)} tasks")
                 if show_notification:
-                    Notification('Todoist', f'Synced {len(self.tasks)} tasks').send()
+                    Notification("Todoist", f"Synced {len(self._tasks)} tasks").send()
             else:
-                try:
-                    err = resp.json()
-                    warning(f"Sync failed: {resp.status_code} {err}")
-                except Exception:
-                    warning(f"Sync failed: {resp.status_code}")
+                self._log_api_error("sync", response)
         except Exception as e:
-            critical(f"Error during sync: {str(e)}")
+            critical(f"Error during sync: {e}")
         finally:
             self._syncing = False
 
-    def _quick_add_task(self):
-        openUrl("https://todoist.com/app/today")
-
-    def _show_today_tasks(self, query: Query):
-        # self._refresh_tasks()
-        cfg_max = int(self.readConfig('max_tasks', int) or 10)
-        cfg_project = self.readConfig('project', str) or 'inbox'
-        cfg_show_today = bool(self.readConfig('show_today_only', bool) if self.readConfig('show_today_only', bool) is not None else True)
-        project_id = None
-        if cfg_project.lower() in ('inbox', 'inbox_project'):
-            project_id = self.user.get('inbox_project_id')
-        else:
-            for p in self.projects:
-                if p.get('name', '').lower() == cfg_project.lower():
-                    project_id = p.get('id')
-                    break
-            if not project_id:
-                project_id = cfg_project
-
-        def due_is_today(due):
-            if not due:
-                return False
-            date_str = due.get('date') or due.get('datetime')
-            if not date_str:
-                return False
-            try:
-                if 'T' in date_str:
-                    dt = datetime.fromisoformat(date_str.replace('Z', '+00:00'))
-                    d = dt.date()
-                else:
-                    d = datetime.strptime(date_str, '%Y-%m-%d').date()
-                return d == datetime.utcnow().date()
-            except Exception:
-                return False
-
-        filtered = []
-        for t in self.tasks:
-            # if project_id and str(t.get('project_id')) != str(project_id):
-                # continue
-            if t.get('checked'):
-                continue
-            if t.get('is_deleted'):
-                continue
-            if cfg_show_today:
-                if not due_is_today(t.get('due')):
-                    continue
-            filtered.append(t)
-
-        filtered.sort(key=lambda x: x.get('day_order', 0) if x.get('day_order') is not None else 0)
-        items = []
-        for t in filtered[:cfg_max]:
-            due = t.get('due')
-            due_str = ''
-            if due:
-                due_str = due.get('date') or due.get('datetime') or ''
-            task_id = t.get('id')
-            task_content = t.get('content', '')
-            items.append(StandardItem(
-                id=task_id,
-                text=task_content,
-                subtext=f"{due_str}",
-                actions=[
-                    Action('open', 'Show details', lambda tid=task_id: openUrl(f"https://todoist.com/app/task/{tid}")),
-                    Action('done', '✓ Set as done', lambda tid=task_id, tc=task_content: self._complete_task(tid, tc))
-                ]
-            ))
-
-        if not items:
-            query.add(StandardItem(id='no-tasks', text='No tasks', subtext='No tasks matched the filters'))
-        else:
-            query.add(items)
+    def _log_api_error(self, action: str, response):
+        """Log API error with response details."""
+        try:
+            err = response.json()
+            warning(f"Failed to {action}: {response.status_code} {err}")
+        except Exception:
+            warning(f"Failed to {action}: {response.status_code}")
