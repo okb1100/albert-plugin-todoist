@@ -65,5 +65,7 @@ MIT License
 ## Disclaimer
 
 Albert Todoist Plugin is not created by, affiliated with, or supported by Doist
+
+
 Albert Todoist Plugin is not created by, affiliated with, or supported by Albert Launcher Development Team
 
