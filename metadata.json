@@ -1,6 +1,7 @@
 {
     "name": "Todoist",
     "description": "Manage Todoist tasks",
+    "version": "2.0.0",
     "license": "MIT",
     "authors": ["@okb1100"],
     "maintainers": ["@okb1100"],

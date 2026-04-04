@@ -1,71 +1,100 @@
-# Albert Plugin: Todoist
+# Todoist for Albert
 
-Manage your Todoist tasks directly from Albert launcher.
+A plugin for [Albert launcher](https://albertlauncher.github.io/) that integrates with [Todoist](https://todoist.com), bringing task management into your keyboard-driven workflow.
 
 ## Features
 
-- Add new tasks with natural language support (dates, projects, labels, priorities)
-- Search existing tasks
-- View today's tasks
-- Complete tasks directly from Albert
-- Project-specific task management
-- Quick access to Todoist web interface
-
-## Setup
-
-1. Get your API token from Todoist Settings → Integrations → API token
-2. Configure the token in Albert plugin settings
-3. Use `td` trigger to access Todoist functionality
-
-## Usage
-
-- `td` - Show today's tasks and main options
-- `td add <content>` - Add new task
-- `td project <name>` - Show project tasks
-- `td <search>` - Search tasks
-
-### Adding Tasks with Natural Language
-
-When adding tasks, you can use Todoist's natural language features:
-
-- **Dates**: `td add clean the room today`, `td add meeting tomorrow at 3pm`
-- **Projects**: `td add Buy book #Books` (use `#` followed by project name without spaces)
-- **Labels**: `td add urgent task @work @important`
-- **Priority**: `td add important task p1` (p1 is highest, p4 is lowest)
-- **Deadlines**: `td add finish report {next friday}`
-- **Description**: `td add task title // this is the description`
-
-### Task Actions (Keyboard Shortcuts)
-
-When viewing tasks:
-
-- **Enter** - Open task details in Todoist web
-- **Alt + ↓** then **Enter** - Opens the action menu where you can:
-  - Show details (open in web)
-  - ✓ Set as done (complete the task)
-
-## Installation
-
-1. Clone or copy this plugin to your Albert Python plugins directory
-    - MacOS: `git clone git@github.com/okb1100/albert-plugin-todoist ~/Library/Application\ Support/albert/python/plugins`
-    - Linux: `git clone git@github.com/okb1100/albert-plugin-todoist ~/.local/share/albert/python/plugins`
-2. Restart Albert and enable the plugin in Albert settings
-3. Configure your Todoist API token in the plugin settings
+- **Quick Add** — Create tasks using Todoist's natural language parsing (dates, projects, labels, priorities, descriptions)
+- **Today View** — See tasks due today at a glance
+- **Search** — Find any task with fuzzy matching
+- **Projects** — Browse and filter tasks by project
+- **Complete** — Mark tasks as done without leaving Albert
 
 ## Requirements
 
-- Python 3.6+
-- requests library
-- Todoist account with API access
+- Albert v34.0.0 or later
+- Python 3.9+
+- A [Todoist](https://todoist.com) account
+
+## Installation
+
+Clone this repository into your Albert Python plugins directory:
+
+**macOS**
+```sh
+git clone https://github.com/okb1100/albert-plugin-todoist.git \
+  ~/Library/Application\ Support/albert/python/plugins/albert-plugin-todoist
+```
+
+**Linux**
+```sh
+git clone https://github.com/okb1100/albert-plugin-todoist.git \
+  ~/.local/share/albert/python/plugins/albert-plugin-todoist
+```
+
+Then restart Albert and enable **Todoist** in Settings > Plugins.
+
+## Setup
+
+1. Go to [Todoist Settings > Integrations > Developer](https://app.todoist.com/app/settings/integrations/developer) and copy your API token.
+2. Open Albert Settings > Plugins > Todoist and paste your token.
+
+## Usage
+
+All commands use the `td` trigger (with a trailing space).
+
+| Command | Description |
+|---|---|
+| `td` | Show today's tasks and quick actions |
+| `td add <content>` | Add a new task |
+| `td today` | Show today's tasks |
+| `td project` | List all projects |
+| `td project <name>` | Show tasks in a project |
+| `td <query>` | Search tasks |
+
+### Natural Language
+
+Task creation supports Todoist's full natural language syntax:
+
+```
+td add Buy groceries tomorrow at 5pm #Personal @errands p2
+td add Finish report {next friday} // remember to include Q1 data
+```
+
+- **Dates** — `today`, `tomorrow`, `next monday`, `jan 15 at 3pm`
+- **Projects** — `#ProjectName`
+- **Labels** — `@label`
+- **Priority** — `p1` (urgent) through `p4` (default)
+- **Deadlines** — `{date}` for hard deadlines
+- **Description** — `// text` appended after the title
+
+### Actions
+
+When viewing a task, press **Enter** to open it in Todoist. Use **Alt+Down** to reveal additional actions including marking the task as done.
+
+## Configuration
+
+Available in Albert Settings > Plugins > Todoist:
+
+| Setting | Default | Description |
+|---|---|---|
+| API Token | — | Your Todoist API token |
+| Max tasks | 10 | Maximum number of tasks shown (1–50) |
+| Project | inbox | Default project filter |
+| Show today only | On | Only show tasks due today |
+
+---
 
 ## License
 
-MIT License
+[MIT](LICENSE)
+
+## Privacy
+
+This plugin communicates exclusively with the official Todoist API (`api.todoist.com`). Your API token is stored locally in Albert's configuration directory. No data is collected, tracked, or sent to third parties. See [PRIVACY.md](PRIVACY.md) for details.
 
 ## Disclaimer
 
 Albert Todoist Plugin is not created by, affiliated with, or supported by Doist
 
-
 Albert Todoist Plugin is not created by, affiliated with, or supported by Albert Launcher Development Team
-

@@ -5,9 +5,10 @@ import json
 import requests
 import threading
 from datetime import datetime, date
+from pathlib import Path
 
-md_iid = "4.0"
-md_version = "1.2"
+md_iid = "5.0"
+md_version = "2.0"
 md_name = "Todoist"
 md_description = "Manage Todoist tasks"
 md_license = "MIT"
@@ -21,12 +22,12 @@ TODOIST_API_BASE = "https://api.todoist.com/api/v1"
 TODOIST_WEB_BASE = "https://todoist.com/app"
 
 
-class Plugin(PluginInstance, TriggerQueryHandler):
+class Plugin(PluginInstance, GeneratorQueryHandler):
     """Todoist integration for Albert launcher."""
 
     def __init__(self):
         PluginInstance.__init__(self)
-        TriggerQueryHandler.__init__(self)
+        GeneratorQueryHandler.__init__(self)
 
         # Runtime state (not persisted)
         self._projects: list = []
@@ -45,15 +46,6 @@ class Plugin(PluginInstance, TriggerQueryHandler):
     # Extension interface
     # -------------------------------------------------------------------------
 
-    def id(self) -> str:
-        return __name__
-
-    def name(self) -> str:
-        return md_name
-
-    def description(self) -> str:
-        return md_description
-
     def defaultTrigger(self) -> str:
         return "td "
 
@@ -65,6 +57,14 @@ class Plugin(PluginInstance, TriggerQueryHandler):
 
     def setFuzzyMatching(self, enabled: bool):
         self._fuzzy = enabled
+
+    # -------------------------------------------------------------------------
+    # Icon
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def makeIcon():
+        return Icon.theme("todoist") if False else Icon.grapheme("✓")
 
     # -------------------------------------------------------------------------
     # Config helpers (cached reads to avoid I/O on every keystroke)
@@ -158,33 +158,30 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         ]
 
     # -------------------------------------------------------------------------
-    # Query handling
+    # Query handling (GeneratorQueryHandler - yields batches of items)
     # -------------------------------------------------------------------------
 
-    def handleTriggerQuery(self, query: Query):
-        if not query.isValid:
-            return
+    def items(self, ctx):
+        query_string = ctx.query.strip()
 
         token = self._get_api_token()
         if not token:
-            query.add(self._make_no_token_item())
+            yield [self._make_no_token_item()]
             return
 
-        query_string = query.string.strip()
-
         if not query_string:
-            self._show_default_options(query)
+            yield from self._show_default_options(ctx)
         elif query_string == "today":
-            self._show_today_tasks(query)
+            yield from self._show_today_tasks(ctx)
         elif query_string.startswith("add "):
-            self._handle_add_task(query, query_string[4:])
+            yield from self._handle_add_task(ctx, query_string[4:])
         elif query_string.startswith("project "):
-            self._handle_project_query(query, query_string[8:])
+            yield from self._handle_project_query(ctx, query_string[8:])
         else:
-            self._search_tasks(query, query_string)
+            yield from self._search_tasks(ctx, query_string)
 
-    def _show_default_options(self, query: Query):
-        if not query.isValid:
+    def _show_default_options(self, ctx):
+        if not ctx.isValid:
             return
 
         items = [
@@ -192,37 +189,40 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 id="add-task",
                 text="Add new task",
                 subtext="td add <task content>",
+                icon_factory=Plugin.makeIcon,
                 actions=[Action("add", "Open Todoist", lambda: openUrl(f"{TODOIST_WEB_BASE}/today"))],
             ),
             StandardItem(
                 id="refresh",
                 text="Refresh tasks",
                 subtext="Sync with Todoist",
+                icon_factory=Plugin.makeIcon,
                 actions=[Action("refresh", "Refresh", lambda: self._refresh_tasks())],
             ),
         ]
-        query.add(items)
-        self._show_today_tasks(query)
+        yield items
+        yield from self._show_today_tasks(ctx)
 
-    def _handle_add_task(self, query: Query, content: str):
-        if not query.isValid:
+    def _handle_add_task(self, ctx, content: str):
+        if not ctx.isValid:
             return
 
         content = content.strip()
         if not content:
             return
 
-        query.add(
+        yield [
             StandardItem(
                 id="add-task-action",
                 text=f"Add task: {content}",
                 subtext="dates, #Project, @label, p1-p4, // description",
+                icon_factory=Plugin.makeIcon,
                 actions=[Action("add", "Add task", lambda c=content: self._add_task(c))],
             )
-        )
+        ]
 
-    def _handle_project_query(self, query: Query, project_name: str):
-        if not query.isValid:
+    def _handle_project_query(self, ctx, project_name: str):
+        if not ctx.isValid:
             return
 
         project_name = project_name.strip()
@@ -234,6 +234,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                     id=str(p.get("id")),
                     text=p.get("name", "Unknown"),
                     subtext=f"Type 'td project {p.get('name')}' to see tasks",
+                    icon_factory=Plugin.makeIcon,
                     actions=[
                         Action(
                             "open",
@@ -244,7 +245,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 )
                 for p in self._projects
             ]
-            query.add(items) if items else query.add(self._make_empty_item("No projects"))
+            yield items if items else [self._make_empty_item("No projects")]
             return
 
         # Find matching project
@@ -252,7 +253,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         matching_project = next((p for p in self._projects if matcher.match(p.get("name", ""))), None)
 
         if not matching_project:
-            query.add(self._make_empty_item("No matching project", "Try a different name"))
+            yield [self._make_empty_item("No matching project", "Try a different name")]
             return
 
         project_id = matching_project.get("id")
@@ -268,30 +269,30 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         ]
 
         if not project_tasks:
-            query.add(
+            yield [
                 StandardItem(
                     id="no-tasks",
                     text=f"No tasks in {project_display_name}",
                     subtext="All tasks completed or project is empty",
+                    icon_factory=Plugin.makeIcon,
                     actions=[
                         Action("open", "Open Project", lambda: openUrl(f"{TODOIST_WEB_BASE}/project/{project_id}"))
                     ],
                 )
-            )
+            ]
             return
 
-        items = [self._make_task_item(t, project_display_name) for t in project_tasks]
-        query.add(items)
+        yield [self._make_task_item(t, project_display_name) for t in project_tasks]
 
-    def _search_tasks(self, query: Query, search_term: str):
-        if not query.isValid:
+    def _search_tasks(self, ctx, search_term: str):
+        if not ctx.isValid:
             return
 
         matcher = Matcher(search_term, MatchConfig(fuzzy=self._fuzzy))
         items = []
 
         for t in self._tasks:
-            if not query.isValid:
+            if not ctx.isValid:
                 return
             if t.get("checked") or t.get("is_deleted"):
                 continue
@@ -299,12 +300,12 @@ class Plugin(PluginInstance, TriggerQueryHandler):
                 items.append(self._make_task_item(t))
 
         if items:
-            query.add(items)
+            yield items
         else:
-            query.add(self._make_empty_item("No matching tasks", "Try a different query"))
+            yield [self._make_empty_item("No matching tasks", "Try a different query")]
 
-    def _show_today_tasks(self, query: Query):
-        if not query.isValid:
+    def _show_today_tasks(self, ctx):
+        if not ctx.isValid:
             return
 
         max_tasks = self._get_max_tasks()
@@ -324,11 +325,10 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         filtered.sort(key=lambda x: x.get("day_order") or 0)
 
         if not filtered:
-            query.add(self._make_empty_item("No tasks", "No tasks matched the filters"))
+            yield [self._make_empty_item("No tasks", "No tasks matched the filters")]
             return
 
-        items = [self._make_task_item(t) for t in filtered[:max_tasks]]
-        query.add(items)
+        yield [self._make_task_item(t) for t in filtered[:max_tasks]]
 
     # -------------------------------------------------------------------------
     # Item factory helpers
@@ -349,6 +349,7 @@ class Plugin(PluginInstance, TriggerQueryHandler):
             id=str(task_id),
             text=task_content,
             subtext=subtext,
+            icon_factory=Plugin.makeIcon,
             actions=[
                 Action("open", "Show details", lambda tid=task_id: openUrl(f"{TODOIST_WEB_BASE}/task/{tid}")),
                 Action(
@@ -360,13 +361,14 @@ class Plugin(PluginInstance, TriggerQueryHandler):
         )
 
     def _make_empty_item(self, text: str, subtext: str = "") -> StandardItem:
-        return StandardItem(id="empty", text=text, subtext=subtext)
+        return StandardItem(id="empty", text=text, subtext=subtext, icon_factory=Plugin.makeIcon)
 
     def _make_no_token_item(self) -> StandardItem:
         return StandardItem(
             id="no-token",
             text="No API token configured",
             subtext="Go to plugin settings to configure your Todoist API token",
+            icon_factory=Plugin.makeIcon,
             actions=[Action("config", "Open settings", lambda: openUrl("albert://settings"))],
         )
 
