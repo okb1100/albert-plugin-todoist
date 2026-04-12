@@ -83,6 +83,10 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         val = self.readConfig("show_today_only", bool)
         return True if val is None else bool(val)
 
+    def _get_show_subtasks(self) -> bool:
+        val = self.readConfig("show_subtasks", bool)
+        return True if val is None else bool(val)
+
     # -------------------------------------------------------------------------
     # Config widget (for Albert settings UI)
     # -------------------------------------------------------------------------
@@ -119,6 +123,14 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
     def show_today_only(self, value: bool):
         self.writeConfig("show_today_only", value)
 
+    @property
+    def show_subtasks(self) -> bool:
+        return self._get_show_subtasks()
+
+    @show_subtasks.setter
+    def show_subtasks(self, value: bool):
+        self.writeConfig("show_subtasks", value)
+
     def configWidget(self) -> list:
         return [
             {
@@ -150,6 +162,11 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
                 "type": "checkbox",
                 "property": "show_today_only",
                 "label": "Show today only",
+            },
+            {
+                "type": "checkbox",
+                "property": "show_subtasks",
+                "label": "Show subtasks",
             },
             {
                 "type": "label",
@@ -260,12 +277,14 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         project_display_name = matching_project.get("name", "Unknown")
 
         # Filter tasks for this project
+        show_subtasks = self._get_show_subtasks()
         project_tasks = [
             t
             for t in self._tasks
             if str(t.get("project_id")) == str(project_id)
             and not t.get("checked")
             and not t.get("is_deleted")
+            and (show_subtasks or not t.get("parent_id"))
         ]
 
         if not project_tasks:
@@ -289,12 +308,15 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
             return
 
         matcher = Matcher(search_term, MatchConfig(fuzzy=self._fuzzy))
+        show_subtasks = self._get_show_subtasks()
         items = []
 
         for t in self._tasks:
             if not ctx.isValid:
                 return
             if t.get("checked") or t.get("is_deleted"):
+                continue
+            if not show_subtasks and t.get("parent_id"):
                 continue
             if matcher.match(t.get("content", "")):
                 items.append(self._make_task_item(t))
@@ -312,12 +334,15 @@ class Plugin(PluginInstance, GeneratorQueryHandler):
         show_today = self._get_show_today_only()
         today = date.today()
 
+        show_subtasks = self._get_show_subtasks()
+
         # Filter tasks
         filtered = [
             t
             for t in self._tasks
             if not t.get("checked")
             and not t.get("is_deleted")
+            and (show_subtasks or not t.get("parent_id"))
             and (not show_today or self._is_due_on_date(t.get("due"), today))
         ]
 
