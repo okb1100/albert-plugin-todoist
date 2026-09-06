@@ -95,6 +95,6 @@ This plugin communicates exclusively with the official Todoist API (`api.todoist
 
 ## Disclaimer
 
-Albert Todoist Plugin is not created by, affiliated with, or supported by Doist
+Albert Todoist Plugin is not created by, affiliated with, or supported by Todoist
 
 Albert Todoist Plugin is not created by, affiliated with, or supported by Albert Launcher Development Team
